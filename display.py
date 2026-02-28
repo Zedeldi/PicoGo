@@ -125,6 +125,8 @@ class ColourMode:
 class Display(framebuf.FrameBuffer):
     """Control an ST7789 display."""
 
+    BAUDRATE = 10_000_000
+
     def __init__(
         self,
         width: int = 240,
@@ -145,7 +147,7 @@ class Display(framebuf.FrameBuffer):
         self.cs = cs
         self.cs.on()
         self.spi = SPI(
-            1, 10_000_000, polarity=0, phase=0, sck=sck, mosi=mosi, miso=None
+            1, self.BAUDRATE, polarity=0, phase=0, sck=sck, mosi=mosi, miso=None
         )
         self.rst = rst
         self.backlight = backlight

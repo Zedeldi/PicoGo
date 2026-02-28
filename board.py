@@ -2,6 +2,7 @@ import os
 
 from machine import Timer
 
+from bluetooth import Bluetooth
 from display import Display, NeoPixel
 from motor import Drive, DriveState
 from ranging import Infrared, Sonar
@@ -36,6 +37,9 @@ class Board:
         # Sensors
         self.battery = Battery()
         self.temperature = Temperature()
+        # Control
+        self.bluetooth = Bluetooth()
+        self.remote = Remote()
 
     def display_information(self) -> None:
         """Show board information on screen."""
@@ -65,7 +69,6 @@ class PicoGo(Board):
         super().__init__()
         self._timers = []
         self._callbacks = []
-        self.remote = Remote()
         self.default_speed = self.drive.speed = default_speed
         self.allow_collisions = allow_collisions
 
@@ -79,6 +82,11 @@ class PicoGo(Board):
                     callback=lambda _: self.display_information(),
                 ),
             ]
+        )
+        self._callbacks.append(
+            lambda board: board.bluetooth.callback(
+                board, default_speed=board.default_speed
+            )
         )
         self._callbacks.append(
             lambda board: board.remote.callback(
