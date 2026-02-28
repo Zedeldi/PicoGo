@@ -125,22 +125,32 @@ class ColourMode:
 class Display(framebuf.FrameBuffer):
     """Control an ST7789 display."""
 
-    def __init__(self, width: int = 240, height: int = 135):
+    def __init__(
+        self,
+        width: int = 240,
+        height: int = 135,
+        dc: Pin = Pin(8, Pin.OUT),
+        cs: Pin = Pin(9, Pin.OUT),
+        sck: Pin = Pin(10),
+        mosi: Pin = Pin(11),
+        rst: Pin = Pin(12, Pin.OUT),
+        backlight: Pin = Pin(13, Pin.OUT),
+    ):
         self.width = width
         self.height = height
+        self.buffer = bytearray(self.height * self.width * 2)
 
-        self.dc = Pin(8, Pin.OUT)
+        self.dc = dc
         self.dc.on()
-        self.cs = Pin(9, Pin.OUT)
+        self.cs = cs
         self.cs.on()
         self.spi = SPI(
-            1, 10_000_000, polarity=0, phase=0, sck=Pin(10), mosi=Pin(11), miso=None
+            1, 10_000_000, polarity=0, phase=0, sck=sck, mosi=mosi, miso=None
         )
-        self.rst = Pin(12, Pin.OUT)
-        self.bl = Pin(13, Pin.OUT)
-        self.bl.on()
+        self.rst = rst
+        self.backlight = backlight
+        self.backlight.on()
 
-        self.buffer = bytearray(self.height * self.width * 2)
         super().__init__(self.buffer, self.width, self.height, framebuf.RGB565)
         self.init_display()
 
@@ -169,13 +179,38 @@ class Display(framebuf.FrameBuffer):
         """Set colour mode of display."""
         self.write(command=DisplayCommand.COLMOD, data=[mode & 0x77])
 
-    def init_display(self):
-        """Initialise display."""
+    def _set_memory_access_mode(self, mode: int) -> None:
+        """Set memory access mode of display."""
+        self.write(command=DisplayCommand.MADCTL, data=[mode])
+
+    def reset(self, soft: bool = False) -> None:
+        """Reset display."""
+        if soft:
+            self.write(command=DisplayCommand.SWRESET)
+            return
         self.rst.on()
         self.rst.off()
         self.rst.on()
 
-        self.write(command=DisplayCommand.MADCTL, data=[0x70])
+    def invert(self, value: bool) -> None:
+        """Enable or disable inversion mode."""
+        self.write(command=DisplayCommand.INVON if value else DisplayCommand.INVOFF)
+
+    def sleep(self, value: bool) -> None:
+        """Enable or disable sleep mode."""
+        self.write(command=DisplayCommand.SLPIN if value else DisplayCommand.SLPOUT)
+
+    def power(self, value: bool) -> None:
+        """Enable or disable display."""
+        self.write(command=DisplayCommand.DISPON if value else DisplayCommand.DISPOFF)
+
+    def init_display(self):
+        """Initialise display."""
+        self.reset()
+
+        self._set_memory_access_mode(
+            MemoryAccessMode.MADCTL_MX | MemoryAccessMode.MADCTL_MV
+        )
         self._set_colour_mode(ColourMode.COLOUR_MODE_16BIT)
         self.write(command=DisplayCommand.PORCHCTL, data=[0x0C, 0x0C, 0x00, 0x33, 0x33])
         self.write(command=DisplayCommand.GATECTL, data=[0x35])
@@ -224,9 +259,9 @@ class Display(framebuf.FrameBuffer):
                 0x23,
             ],
         )
-        self.write(command=DisplayCommand.INVON)
-        self.write(command=DisplayCommand.SLPOUT)
-        self.write(command=DisplayCommand.DISPON)
+        self.invert(True)
+        self.sleep(False)
+        self.power(True)
 
     def show(self):
         """Write framebuffer to display."""
