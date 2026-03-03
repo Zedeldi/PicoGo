@@ -1,5 +1,4 @@
 import rp2
-import utime
 from machine import Pin
 
 
@@ -18,6 +17,26 @@ def spi_cpha0():
     in_(pins, 1).side(0x1)[1]  # noqa: F821
 
 
+class Sensor:
+    """Class to store sensor data."""
+
+    MINIMUM_VALUE = 0
+    MAXIMUM_VALUE = 1023
+
+    def __init__(self) -> None:
+        """Initialise sensor instance."""
+        self.minimum = self.MINIMUM_VALUE
+        self.maximum = self.MAXIMUM_VALUE
+
+
+class Sensors(list):
+    """Class to handle multiple sensors."""
+
+    def __init__(self, num_sensors: int) -> None:
+        """Initialise calibration instance."""
+        super().__init__(Sensor() for _ in range(num_sensors))
+
+
 class Tracking:
     """Class to handle infrared tracking."""
 
@@ -30,9 +49,7 @@ class Tracking:
         cs: Pin = Pin(28, Pin.OUT),
     ) -> None:
         """Initialise instance and state machine."""
-        self.num_sensors = num_sensors
-        self.calibrated_min = [0] * self.num_sensors
-        self.calibrated_max = [1023] * self.num_sensors
+        self.sensors = Sensors(num_sensors)
         self.last_value = 0.0
         self.clock = clock
         self.address = address
@@ -49,59 +66,58 @@ class Tracking:
         )
         self.sm.active(1)
 
-    def analog_read(self):
+    def analog_read(self) -> list[int]:
         """
-        Read the sensor values into an array.
+        Read the sensor values and return as a list.
 
-        There *MUST* be space for as many values as there were sensors specified
-        in the constructor.
-
-        Example usage:
-        unsigned int sensor_values[8];9
-        sensors.read(sensor_values);
         The values returned are a measure of the reflectance in abstract units,
         with higher values corresponding to lower reflectance (e.g. a black
         surface or a void).
-        """
-        value = [0] * (self.num_sensors + 1)
 
+        The StateMachine returns the value of the last selected channel/sensor,
+        e.g. when index = 3, the 2nd sensor value will get appended.
+        """
+        values = []
         # Read each channel AD value
-        for j in range(0, self.num_sensors + 1):
+        for index in range(len(self.sensors) + 1):
             self.cs.value(0)
             # set channel
-            self.sm.put(j << 28)
+            self.sm.put(index << 28)
             # get last channel value
-            value[j] = self.sm.get() & 0xFFF
+            values.append((self.sm.get() & 0xFFF) >> 2)
             self.cs.value(1)
-            value[j] >>= 2
-        utime.sleep_ms(2)
-        return value[1:]
+        return values[1:]
 
-    def calibrate(self):
+    def calibrate(self, iterations: int = 10) -> None:
         """
-        Read the sensors 10 times and use the results for calibration.
+        Read the sensors multiple times and use the results for calibration.
 
         The sensor values are not returned; instead, the maximum and minimum
         values found over time are stored internally and used for the
         read_calibrated method.
         """
-        max_sensor_values = [0] * self.num_sensors
-        min_sensor_values = [0] * self.num_sensors
-        for j in range(0, 10):
+        min_sensor_values = [0] * len(self.sensors)
+        max_sensor_values = [0] * len(self.sensors)
+        for iteration in range(iterations):
             sensor_values = self.analog_read()
-            for i in range(0, self.num_sensors):
-                # set the max we found this time
-                if (j == 0) or max_sensor_values[i] < sensor_values[i]:
-                    max_sensor_values[i] = sensor_values[i]
+            for index, value in enumerate(sensor_values):
                 # set the min we found this time
-                if (j == 0) or min_sensor_values[i] > sensor_values[i]:
-                    min_sensor_values[i] = sensor_values[i]
+                if (iteration == 0) or min_sensor_values[index] > value:
+                    min_sensor_values[index] = value
+                # set the max we found this time
+                if (iteration == 0) or max_sensor_values[index] < value:
+                    max_sensor_values[index] = value
         # record the min and max calibration values
-        for i in range(0, self.num_sensors):
-            if min_sensor_values[i] > self.calibrated_min[i]:
-                self.calibrated_min[i] = min_sensor_values[i]
-            if max_sensor_values[i] < self.calibrated_max[i]:
-                self.calibrated_max[i] = max_sensor_values[i]
+        for index, values in enumerate(
+            zip(min_sensor_values, max_sensor_values, strict=True)
+        ):
+            sensor = self.sensors[index]
+            minimum, maximum = values
+            # minimum and maximum should converge each calibration
+            if minimum > sensor.minimum:
+                sensor.minimum = minimum
+            if maximum < sensor.maximum:
+                sensor.maximum = maximum
 
     def read_calibrated(self):
         """
@@ -114,15 +130,16 @@ class Tracking:
         """
         value = 0
         sensor_values = self.analog_read()
-        for i in range(0, self.num_sensors):
-            denominator = self.calibrated_max[i] - self.calibrated_min[i]
+        for index, value in enumerate(sensor_values):
+            sensor = self.sensors[index]
+            denominator = sensor.maximum - sensor.minimum
             if denominator != 0:
-                value = (sensor_values[i] - self.calibrated_min[i]) * 1000 / denominator
+                value = (value - sensor.minimum) * 1000 / denominator
             if value < 0:
                 value = 0
             elif value > 1000:
                 value = 1000
-            sensor_values[i] = int(value)
+            sensor_values[index] = int(value)
         return sensor_values
 
     def read_line(self, white_line: bool = False):
@@ -149,32 +166,29 @@ class Tracking:
         second argument white_line to true. In this case, each sensor value
         will be replaced by (1000 - value) before averaging.
         """
-        sensor_values = self.read_calibrated()
         avg = 0
-        sum = 0
-        on_line = 0
-        for i in range(0, self.num_sensors):
-            value = sensor_values[i]
+        total = 0
+        on_line = False
+        sensor_values = self.read_calibrated()
+        for index, value in enumerate(sensor_values):
             if white_line:
                 value = 1000 - value
             # keep track of whether we see the line at all
             if value > 200:
-                on_line = 1
+                on_line = True
             # only average in values that are above a noise threshold
             if value > 50:
-                avg += value * (i * 1000)
+                avg += value * (index * 1000)
                 # this is for the weighted total,
-                sum += value
+                total += value
                 # this is for the denominator
-        if on_line != 1:
+        if not on_line:
             # If it last read to the left of center, return 0.
-            if self.last_value < (self.num_sensors - 1) * 1000 / 2:
-                # print("left")
+            if self.last_value < (len(self.sensors) - 1) * 1000 / 2:
                 self.last_value = 0
             # If it last read to the right of center, return the max.
             else:
-                # print("right")
-                self.last_value = (self.num_sensors - 1) * 1000
+                self.last_value = (len(self.sensors) - 1) * 1000
         else:
-            self.last_value = avg / sum
+            self.last_value = avg / total
         return int(self.last_value), sensor_values
