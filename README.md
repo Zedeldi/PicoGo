@@ -2,7 +2,7 @@
 
 [![GitHub license](https://img.shields.io/github/license/Zedeldi/PicoGo?style=flat-square)](https://github.com/Zedeldi/PicoGo/blob/master/LICENSE) [![GitHub last commit](https://img.shields.io/github/last-commit/Zedeldi/PicoGo?style=flat-square)](https://github.com/Zedeldi/PicoGo/commits) [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg?style=flat-square)](https://github.com/psf/black)
 
-Micropython project to control the [PicoGo Mobile Robot from Waveshare](https://www.waveshare.com/picogo.htm).
+MicroPython project to control the [PicoGo Mobile Robot from Waveshare](https://www.waveshare.com/picogo.htm).
 
 ## Description
 
