@@ -108,9 +108,7 @@ class Tracking:
                 if (iteration == 0) or max_sensor_values[index] < value:
                     max_sensor_values[index] = value
         # record the min and max calibration values
-        for index, values in enumerate(
-            zip(min_sensor_values, max_sensor_values, strict=True)
-        ):
+        for index, values in enumerate(zip(min_sensor_values, max_sensor_values)):
             sensor = self.sensors[index]
             minimum, maximum = values
             # minimum and maximum should converge each calibration
