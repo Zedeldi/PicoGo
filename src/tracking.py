@@ -55,7 +55,7 @@ class Tracking:
         self.address = address
         self.data = data
         self.cs = cs
-        self.cs.value(1)
+        self.cs.on()
         self.sm = rp2.StateMachine(
             1,
             spi_cpha0,
@@ -80,12 +80,12 @@ class Tracking:
         values = []
         # Read each channel AD value
         for index in range(len(self.sensors) + 1):
-            self.cs.value(0)
+            self.cs.off()
             # set channel
             self.sm.put(index << 28)
             # get last channel value
             values.append((self.sm.get() & 0xFFF) >> 2)
-            self.cs.value(1)
+            self.cs.on()
         return values[1:]
 
     def calibrate(self, iterations: int = 10) -> None:
